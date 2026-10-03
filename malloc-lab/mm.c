@@ -20,7 +20,7 @@
 
 // 매크로 리스트 
 #define WSIZE 4  // header, footer size (single word == 4B)
-#define DSIZE 8 // double word size == Minimum block size (8B) 
+#define DSIZE 8 // double word size != Minimum block size (16B) 
 #define CHUNKSIZE (1<<12)  // 24bytes 
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
@@ -69,7 +69,7 @@ team_t team = {
 static void *extend_heap(size_t words);
 static void *coalesce(void *bp);
 static void *find_fit(size_t asize);
-static void place(void *bp, size_t asize);
+static void place(char *bp, size_t asize);
 /*
  * mm_init - initialize the malloc package.
  */
@@ -84,13 +84,10 @@ int mm_init(void){
     PUT(heap_listp, 0); // unused block
     PUT(heap_listp +(1*WSIZE), PACK(DSIZE, 1)); // prologue header
     PUT(heap_listp +(2*WSIZE), PACK(DSIZE, 1)); // prologue footer (header copy)
-    PUT(heap_listp +(3*WSIZE), PACK(0, 1)); // epilogue header(0B, alc)
-    heap_listp += (2*WSIZE); // initial alloc point(address)
+    PUT(heap_listp +(3*WSIZE), PACK(0, 1)); // epilogue header 
+    heap_listp += (2*WSIZE); // initial alloc point
 
-    
-    // 2. 새로운 힙 가져오기?
-    // mem_sbrk(CHUNKSIZE);
-    
+    // 2. heap 가져오기 
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL){
         return -1;
     } 
@@ -100,28 +97,35 @@ int mm_init(void){
 }
 
 // 메모리 할당 
-static void place(void *bp, size_t asize){
+static void place(char *bp, size_t asize){
     // 인자로 free block 주소가 들어옴
-    // Dsize 이상이면 스플릿? 왜지요? 내부 단편화 막기위해서? 
     // 스플릿 해주는 이유 새로운 free block area 만들어야하니까.
     
-    // 0. 프리 사이즈에서 요청 사이즈 뺸 크기가 DSIZE 보다 크거나 같음. 
-    size_t temp = GET_SIZE(HDRP(bp));
+    // a. 쪼갰을때 free block이 최소 블록 사이즈 큼
 
-    // 1.헤더의 값을 바꾸기 
-    PUT(HDRP(bp), PACK(asize, 1));
-    
-    // 2. 푸터 바꿔주기
-    PUT(bp+asize -(WSIZE*2), PACK(asize, 1));
-
-    // 3. 무적권 8 초과
-    if (temp > asize){
-        PUT(bp+asize-WSIZE, PACK(temp-asize,0));
-        PUT(bp+temp-DSIZE, PACK(temp-asize,0));
+    // 최소 블록사이즈 기준? 아니면 align 기준점? 
+    if (GET_SIZE(HDRP(bp)) - asize >= DSIZE *2){
+        // a.1 set new free Header 
+        PUT(bp+asize-WSIZE, PACK(GET_SIZE(HDRP(bp)) - asize, 0));
         
+        // a.2 change free Footer
+        PUT(FTRP(bp), PACK(GET_SIZE(HDRP(bp)) - asize, 0));
+        
+        // a.3 set alloc Header
+        PUT(HDRP(bp), PACK(asize, 1));
+
+        // a.4 set alloc Footer
+        PUT(bp + asize-DSIZE, PACK(asize, 1));
         
     }
-    
+    else { // b. 쪼갰을때 free block이 최소 블록 사이즈 작음
+        // b.1 set alloc header
+        PUT(HDRP(bp), PACK(GET_SIZE(HDRP(bp)) , 1));
+
+        // b.2 set alloc footer
+        PUT(FTRP(bp), PACK(GET_SIZE(HDRP(bp)) , 1));
+    }
+
 
     return;
     
@@ -129,18 +133,21 @@ static void place(void *bp, size_t asize){
 }
 // 메모리 자리 찾기 
 static void *find_fit(size_t asize){
-    // first fit 
+    // Search algo : first fit 
     // asize 이하의 첫번째로 찾은 블록 위치를 반환해줘야하는거 아님? 
     // 0. header, footer 플래그 확인하기 
     char *bp = heap_listp;
-    while (GET_SIZE(bp) != 0){
+    while (GET_SIZE(HDRP(bp)) != 0){
 
-        if (!GET_ALLOC(bp) && GET_SIZE(bp) <= asize){
-            return bp;
-        }
+        // if (!GET_ALLOC(HDRP(bp)) && GET_SIZE(HDRP(bp)) <= asize){
+        //     return bp;
+        // }
+        if (!GET_ALLOC(HDRP(bp)) && (GET_SIZE(HDRP(bp)) >= asize)) return bp;
 
         bp = NEXT_BLKP(bp); 
     }
+
+    
 
     
     return NULL;
@@ -164,11 +171,6 @@ static void *extend_heap(size_t words){
 
     // 이전 힙과 새로운 힙 병합
     return coalesce(bp);
-    // bp = heap_listp;
-    // PUT(bp, PACK(8000, 0));
-    // PUT(bp+(8000-4), PACK(8000, 0));
-    // // return 1;
-    // return bp;
     
 
 }
@@ -200,7 +202,6 @@ void *mm_malloc(size_t size){
 
     // 2. 블록 할당 위치 진짜 있음?
     if ((bp = find_fit(asize)) != NULL){
-        
         place(bp, asize);
         return bp;
     }
