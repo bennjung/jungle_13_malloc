@@ -42,17 +42,19 @@
 
 // 블록 포인터 -> prev, next 블록 주소 계산
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)))
-#define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE((char *)(bp) - DSIZE))
+// #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE((char *)(bp) - DSIZE))
+#define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
+
 
 static char *heap_listp;
 
 /* single word (4) or double word (8) alignment */
-#define ALIGNMENT 4
+// #define ALIGNMENT 4
 
-/* rounds up to the nearest multiple of ALIGNMENT */
-#define ALIGN(size) (((size) + (ALIGNMENT - 1)) & ~0x7)
+// /* rounds up to the nearest multiple of ALIGNMENT */
+// #define ALIGN(size) (((size) + (ALIGNMENT - 1)) & ~0x7)
 
-#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
+// #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
 team_t team = {
     /* Team name */
     "ateam",
@@ -69,7 +71,7 @@ team_t team = {
 static void *extend_heap(size_t words);
 static void *coalesce(void *bp);
 static void *find_fit(size_t asize);
-static void place(char *bp, size_t asize);
+static void place(void *bp, size_t asize);
 /*
  * mm_init - initialize the malloc package.
  */
@@ -96,8 +98,8 @@ int mm_init(void){
     return 0;
 }
 
-// 메모리 할당 
-static void place(char *bp, size_t asize){
+// 메모리 할당 // void *bp
+static void place(void *bp, size_t asize){
     // 인자로 free block 주소가 들어옴
     // 스플릿 해주는 이유 새로운 free block area 만들어야하니까.
     
@@ -195,8 +197,12 @@ void *mm_malloc(size_t size){
     // size = 10
     else {
         // asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
-        if (DSIZE+size % 8 ) asize = DSIZE * ((DSIZE+size )/ 8);
-        else asize = DSIZE * (((DSIZE+size) / 8) +1);
+        if ( size % 8 == 0 ){
+            asize = DSIZE * ((DSIZE + size )/ 8);
+        } 
+        else {
+            asize = DSIZE * (((DSIZE+size) / 8) +1);
+        }
         
     }
 
@@ -220,23 +226,27 @@ static void *coalesce(void *bp){
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     size_t size = GET_SIZE(HDRP(bp));
 
-    if (prev_alloc && next_alloc) { /* Case 1 */
+    // next && prev 둘 다 alloc
+    if (prev_alloc && next_alloc) { 
         return bp;
     }
 
-    else if (prev_alloc && !next_alloc) { /* Case 2 */
+    // merge with next block
+    else if (prev_alloc && !next_alloc) { 
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(bp), PACK(size, 0));
-        PUT(FTRP(bp), PACK(size,0));
+        PUT(FTRP(bp), PACK(size, 0));
+        
     }
 
+    // // merge with prev block
     else if (!prev_alloc && next_alloc) { /* Case 3 */
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
-
+    // prev, next 둘 다 free block
     else { /* Case 4 */
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
@@ -258,19 +268,22 @@ void mm_free(void *bp){
 }
 
 //Implemented simply in terms of mm_malloc and mm_free
-void *mm_realloc(void *ptr, size_t size)
-{
+void *mm_realloc(void *ptr, size_t nsize){
+    // size 가 어떤 값?? 
     void *oldptr = ptr;
     void *newptr;
     size_t copySize;
 
-    newptr = mm_malloc(size);
+    newptr = mm_malloc(nsize); // newptr == 새로운 free block 의 payload주소 
     if (newptr == NULL)
         return NULL;
-    copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
-    if (size < copySize)
-        copySize = size;
+
+    copySize = GET_SIZE(HDRP(oldptr))- DSIZE;
+    if (nsize < copySize)
+        copySize = nsize;
+    
     memcpy(newptr, oldptr, copySize);
+    // char 포인터를 size_t 로 타입캐스팅 -> 그다음에 값을 가져온다고? 
     mm_free(oldptr);
     return newptr;
 }
