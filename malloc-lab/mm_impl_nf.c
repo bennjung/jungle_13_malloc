@@ -21,7 +21,7 @@
 // 매크로 리스트 
 #define WSIZE 4  // header, footer size (single word == 4B)
 #define DSIZE 8 // double word size != Minimum block size (16B) 
-#define CHUNKSIZE (1<<12)  // 4096bytes 
+#define CHUNKSIZE (1<<12)  // 24bytes 
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 
@@ -72,8 +72,11 @@ static void *extend_heap(size_t words);
 static void *coalesce(void *bp);
 static void *find_fit(size_t asize);
 static void place(void *bp, size_t asize);
+/*
+ * mm_init - initialize the malloc package.
+ */
 
-// mm_init - initialize the malloc package.
+
 int mm_init(void){
     // 0. 초기 힙 생성
     // 예외처리 sbrk? WSIZE = 4 
@@ -90,7 +93,7 @@ int mm_init(void){
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL){
         return -1;
     } 
-
+    // extend_heap(1<<18);
 
     return 0;
 }
@@ -107,8 +110,8 @@ static void place(void *bp, size_t asize){
         // a.1 set new free Header 
         PUT(bp+asize-WSIZE, PACK(GET_SIZE(HDRP(bp)) - asize, 0));
         
-        // a.2 change free Footer 
-        PUT(FTRP(bp), PACK(GET_SIZE(HDRP(bp)) - asize, 0)); // 여기서 seg fault가? 
+        // a.2 change free Footer
+        PUT(FTRP(bp), PACK(GET_SIZE(HDRP(bp)) - asize, 0));
         
         // a.3 set alloc Header
         PUT(HDRP(bp), PACK(asize, 1));
@@ -262,154 +265,22 @@ void mm_free(void *bp){
 }
 
 //Implemented simply in terms of mm_malloc and mm_free
-void *mm_realloc(void *bp, size_t nsize){
-
-    //[Debug]
-    // static int stretch_e1 = 0;
-    // static int stretch_e2 = 0;
-    // static int stretch_e3 = 0;
-    // static int esa_co = 0;
-    
-    void *oldptr = bp;
+void *mm_realloc(void *ptr, size_t nsize){
+    // size 가 어떤 값?? 
+    void *oldptr = ptr;
     void *newptr;
-    // nsize == payload size 
-    size_t bsize = GET_SIZE(HDRP(bp)) - DSIZE; // payload의 사이즈가 아니라 전체 블록사이즈긴해
-    // newptr == 새로운 free block 의 payload주소 
-    
-    // C1. only current(shrink)
-    // if ( bsize < nsize){
-    //     // 헤더 초기화
-    //     PUT(HDRP(bp), PACK(nsize, 1));
-    //     PUT(FTRP(bp), PACK(nsize, 1));
-    //     // 이게 좀 병신임
-    //     memmove(bp, bp, nsize );
-    //     return bp;
-    // }
+    size_t copySize;
 
-    // C2. Find neighbor free block
-    
-    int palc = GET_ALLOC(HDRP(PREV_BLKP(bp)));
-    int nalc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
-    
-    
-    if (palc+nalc < 2 ){
-        
-        size_t pfsize = GET_SIZE(HDRP(PREV_BLKP(bp))) - DSIZE;
-        size_t nfsize = GET_SIZE(HDRP(NEXT_BLKP(bp))) - DSIZE;
-        size_t usize = DSIZE * ((nsize + DSIZE + (DSIZE-1)) / DSIZE);
-        // size_t sibal;
-        //2.1 current -> prev (move or stretch)
-        // if (palc == 0 && nalc == 1) {
-        //     if (usize <= bsize + pfsize + DSIZE * 2){
-
-        //     }
-            
-        // }
-        //     // nsize <= pfsize -> move
-        //     // nsize < bsize +pfsize -> stretch 
-       
-        //         // a. bp 옮기기
-        //         newptr = PREV_BLKP(bp);
-        //         // b. 남은 공간 계산 
-        //         // sibal = nsize-pfsize;
-                
-                
-        //         size_t usize = DSIZE * ((nsize + DSIZE + (DSIZE-1)) / DSIZE);
-        //         // change header
-        //         PUT(newptr-WSIZE, PACK(usize, 1));
-        //         // bsize만큼만 넘어가면 undefined behavior 뜸 
-        //         memmove(newptr, oldptr, bsize);
-        //         // change footer
-        //         PUT(newptr+ (usize - DSIZE), PACK(usize, 1));
-
-        //         // c. 기존 블록 free 처리 
-        //         mm_free(oldptr);
-        //         return newptr;
-                
-        //     }
-            
-        // } // 2.2 current -> next (only stretch )
-        if (palc == 1 && nalc == 0){ 
-            
-            // b. nsize(요청 사이즈) 와 next blk의 크기 비교
-            // epilogue 에 애매하게 맞닿을수있다? 씨발? 
-            if (usize <= bsize + nfsize + DSIZE * 2){
-
-                // a. newbp 설정
-                newptr = bp;
-                
-                // c1. header
-                PUT(HDRP(newptr), PACK(usize, 1));
-
-                // c2. footer
-                PUT(newptr+nsize, PACK(usize, 1));
-
-                // c3. payload transfer 
-                memmove(newptr, oldptr, bsize);
-
-                // c4. split -> Gen free header footer 
-                if ((nfsize +bsize + DSIZE*2) - usize >= DSIZE * 2){
-                    // header , footer
-                    PUT(newptr+usize-WSIZE, PACK((nfsize +bsize + DSIZE*2) - usize, 0));
-                    PUT(FTRP(NEXT_BLKP(newptr)) , PACK((nfsize +bsize + DSIZE*2) - usize, 0));
-
-                }
-                
-                return newptr;
-
-            }
-            
-            
-
-            
-        } // 2.3 current -> prev or  next (move) -> epilogue 여부 확인해줘야할
-        else if (palc == 0 && nalc == 0){ 
-            if (usize <= nfsize + pfsize + bsize + DSIZE * 3){
-                
-                // a. newbp 설정 
-                // 임의로 prev_blkp 를 시작 포인터로 잡았는데 이게 최적인지 모르겠음. (내부 파편화 관점 )
-                newptr = PREV_BLKP(bp);
-                
-                // b. header 
-                PUT(HDRP(newptr), PACK(usize, 1));
-
-                // c. payload transfer
-                memmove(newptr, oldptr, bsize); 
-
-                // d. footer
-                PUT(newptr+ usize - DSIZE, PACK(usize, 1));
-
-                // e. split 
-                if ((nfsize + pfsize + bsize  + DSIZE*3) - usize >= DSIZE * 2){
-                    // header , footer
-                    PUT(newptr+usize-WSIZE, PACK((nfsize + pfsize + bsize + DSIZE*3) - usize, 0));
-                    PUT(FTRP(NEXT_BLKP(newptr)) , PACK((nfsize + pfsize + bsize + DSIZE*3) - usize, 0));
-
-                }
-                
-                return newptr;
-
-
-                
-                
-            }
-            // 
-        }
-
-    }
-    
-
-    // C3. new place (Move)
-    newptr = mm_malloc(nsize);
+    newptr = mm_malloc(nsize); // newptr == 새로운 free block 의 payload주소 
     if (newptr == NULL)
         return NULL;
 
-    bsize = GET_SIZE(HDRP(oldptr))- DSIZE;
-    if (nsize < bsize)
-        bsize = nsize;
+    copySize = GET_SIZE(HDRP(oldptr))- DSIZE;
+    if (nsize < copySize)
+        copySize = nsize;
     
-    memcpy(newptr, oldptr, bsize);
+    memcpy(newptr, oldptr, copySize);
+    // char 포인터를 size_t 로 타입캐스팅 -> 그다음에 값을 가져온다고? 
     mm_free(oldptr);
-    
     return newptr;
 }
